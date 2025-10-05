@@ -59,6 +59,15 @@
         <!-- Sidebar for Metadata and Annotations -->
         <div class="w-1/4 max-w-xs bg-gray-800 p-4 flex flex-col justify-between overflow-y-auto">
             <div>
+                 <!-- Load New Image Section -->
+                <div class="mb-6 pb-4 border-b border-gray-700">
+                    <h2 class="text-xl font-bold mb-3 text-blue-400">Load New Data</h2>
+                    <input type="url" id="image-url-input" placeholder="Paste NASA Image URL here" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-yellow-500 focus:border-yellow-500 mb-2 text-sm">
+                    <button id="load-image-btn" class="w-full flex items-center justify-center py-2 px-4 rounded-lg font-semibold transition-colors text-sm bg-yellow-600 hover:bg-yellow-700 text-white">
+                        Load New Image
+                    </button>
+                </div>
+                
                 <h2 class="text-xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">Data Metadata</h2>
                 <dl class="space-y-2 text-sm">
                     <div>
@@ -150,6 +159,10 @@
         const imageContainer = document.getElementById('image-container');
         const loadingSpinner = document.getElementById('loading-spinner');
 
+        // New DOM Elements for Image Loading
+        const imageUrlInput = document.getElementById('image-url-input');
+        const loadImageBtn = document.getElementById('load-image-btn');
+
         // Control Buttons
         const zoomInBtn = document.getElementById('zoom-in');
         const zoomOutBtn = document.getElementById('zoom-out');
@@ -186,22 +199,61 @@
         let start = { x: 0, y: 0 };
         let lastTouchDistance = null;
 
-        // Image loading
-        const img = new Image();
-        img.onload = () => {
-            loadingSpinner.style.display = 'none';
-            viewerImage.classList.remove('invisible');
-            if (!modal.classList.contains('hidden')) {
-                resetAndFitImage();
-            }
-        };
-        img.onerror = () => {
-            loadingSpinner.innerHTML = '<p class="text-red-500">Error loading image.</p>';
-        };
-        // Start loading the image immediately
-        img.src = viewerImage.src;
+        // Image object used for loading/preloading
+        let currentImage = new Image();
 
         // --- Functions ---
+        
+        /**
+         * Initializes and loads a new image URL, resetting the viewer state.
+         * @param {string} url - The URL of the image to load.
+         */
+        function initializeImage(url) {
+            // 1. Reset the current image object event handlers and source
+            currentImage.onload = null;
+            currentImage.onerror = null;
+
+            // Prepare UI for loading
+            viewerImage.classList.add('invisible');
+            loadingSpinner.style.display = 'flex';
+            viewerImage.src = ''; // Clear source while loading
+
+            // 2. Setup handlers for the new image
+            currentImage.onload = () => {
+                loadingSpinner.style.display = 'none';
+                viewerImage.src = url; // Set the actual element src once loaded
+                viewerImage.classList.remove('invisible');
+                if (!modal.classList.contains('hidden')) {
+                    resetAndFitImage();
+                }
+            };
+            currentImage.onerror = () => {
+                loadingSpinner.innerHTML = '<p class="text-red-500">Error loading image. Check URL or network.</p>';
+                viewerImage.classList.add('invisible');
+            };
+
+            // 3. Start loading
+            currentImage.src = url;
+        }
+
+        function loadNewImage() {
+            const newUrl = imageUrlInput.value.trim();
+            if (newUrl) {
+                // Clear annotations when a new image is loaded
+                annotations = [];
+                renderAnnotations();
+
+                initializeImage(newUrl);
+                imageUrlInput.value = ''; // Clear input after successful attempt
+            } else {
+                // Simple visual feedback for empty input
+                imageUrlInput.placeholder = "Please paste a URL!";
+                setTimeout(() => {
+                     imageUrlInput.placeholder = "Paste NASA Image URL here";
+                }, 1500);
+            }
+        }
+
         function updateTransform() {
             viewerImage.style.transform = `translate(${state.translateX}px, ${state.translateY}px) rotate(${state.rotate}deg) scaleX(${state.flipX}) scale(${state.scale})`;
             zoomLevelDisplay.textContent = `${Math.round(state.scale * 100)}%`;
@@ -261,7 +313,8 @@
         function openTheModal() {
             modal.classList.remove('hidden');
             document.body.classList.add('overflow-hidden');
-            if (img.complete) {
+            // If the image hasn't loaded yet (which happens on initial load)
+            if (currentImage.complete && currentImage.src) {
                 resetAndFitImage();
             } else {
                 loadingSpinner.style.display = 'flex';
@@ -391,11 +444,21 @@
         window.onload = () => {
             // Apply initial button style
             toggleAnnotationBtn.classList.add('bg-gray-700', 'hover:bg-gray-600', 'text-white');
+            // Initial image load
+            initializeImage(viewerImage.src);
         };
 
         openModalBtn.addEventListener('click', openTheModal);
         closeModal.addEventListener('click', closeTheModal);
         toggleAnnotationBtn.addEventListener('click', toggleAnnotationMode);
+
+        // New Image Loading Listeners
+        loadImageBtn.addEventListener('click', loadNewImage);
+        imageUrlInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                loadNewImage();
+            }
+        });
 
         // Annotation Mode Click
         imageContainer.addEventListener('click', (e) => {
