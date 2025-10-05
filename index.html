@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NASA Space Apps: Embiggen Your Eyes Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Prevent body scroll when modal is open */
+        }
+        #image-container.grabbing {
+            cursor: grabbing;
+        }
+        #image-container.annotating {
+             cursor: crosshair;
+        }
+        #viewer-image {
+            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+        .control-btn {
+            background-color: rgba(31, 41, 55, 0.7);
+            border-radius: 9999px;
+            padding: 0.75rem;
+            transition: background-color 0.2s;
+        }
+        .control-btn:hover {
+            background-color: rgba(55, 65, 81, 0.9);
+        }
+        .annotation-marker {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: #ef4444; /* Red dot */
+            border: 3px solid #fca5a5;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+            z-index: 15;
+            transition: background-color 0.1s;
+        }
+        .annotation-marker:hover {
+            background-color: #dc2626;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen">
+
+    <button id="open-modal-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg transition-colors text-lg shadow-lg">
+        Launch Embiggen Viewer (Curiosity Data)
+    </button>
+
+    <!-- Image Viewer Modal -->
+    <div id="image-viewer-modal" class="hidden fixed inset-0 z-50 bg-gray-900 flex transition-opacity duration-300">
+
+        <!-- Sidebar for Metadata and Annotations -->
+        <div class="w-1/4 max-w-xs bg-gray-800 p-4 flex flex-col justify-between overflow-y-auto">
+            <div>
+                <h2 class="text-xl font-bold mb-4 text-blue-400 border-b border-gray-700 pb-2">Data Metadata</h2>
+                <dl class="space-y-2 text-sm">
+                    <div>
+                        <dt class="font-medium text-gray-400">Mission:</dt>
+                        <dd class="pl-2">Curiosity Mars Rover</dd>
+                    </div>
+                    <div>
+                        <dt class="font-medium text-gray-400">Instrument:</dt>
+                        <dd class="pl-2">Mastcam (Mock High Res Data)</dd>
+                    </div>
+                    <div>
+                        <dt class="font-medium text-gray-400">Resolution:</dt>
+                        <dd class="pl-2">~1.2 Gigapixels (Simulated)</dd>
+                    </div>
+                    <div>
+                        <dt class="font-medium text-gray-400">Acquisition Date:</dt>
+                        <dd class="pl-2">Sol 4278 (2025-09-21)</dd>
+                    </div>
+                </dl>
+
+                <h2 class="text-xl font-bold mt-8 mb-4 text-blue-400 border-b border-gray-700 pb-2">User Annotations (<span id="annotation-count">0</span>)</h2>
+                <ul id="annotation-list" class="space-y-3 text-sm h-64 overflow-y-auto pr-2">
+                    <!-- Annotations go here -->
+                    <li id="no-annotations" class="text-gray-500 italic">Click the crosshair icon to start labeling features.</li>
+                </ul>
+            </div>
+             <!-- Annotation Input Field and Toggle -->
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <input type="text" id="annotation-text" placeholder="Annotation/Feature Name" class="w-full p-2 rounded-lg bg-gray-700 text-white placeholder-gray-400 focus:ring-blue-500 focus:border-blue-500 mb-3 text-sm">
+                <button id="toggle-annotation-mode" class="w-full flex items-center justify-center py-2 px-4 rounded-lg font-semibold transition-colors text-sm" title="Toggle Annotation Mode">
+                    <svg id="annotation-icon" class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9-3a12 12 0 0112 0m2.368 4.28a9.962 9.962 0 01-1.03 2.103v.001m0 0a10.02 10.02 0 00-2.329 1.488L12 20.315l-.641-.334a10.02 10.02 0 00-2.329-1.488l-.001-.001A9.962 9.962 0 014.632 17.28M2.368 4.72C3.513 3.01 5.341 2 7.5 2h9c2.159 0 3.987 1.01 5.132 2.72M12 2a9.75 9.75 0 00-4.632 1.28l.001.001M12 2v18" /></svg>
+                    <span id="annotation-mode-text">Enable Annotation Mode</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Image Container (Main Viewport) -->
+        <div id="image-container" class="relative flex-grow h-full overflow-hidden transition-all duration-300">
+            <div id="loading-spinner" class="absolute inset-0 flex items-center justify-center z-20 bg-gray-900 bg-opacity-70">
+                 <svg class="animate-spin h-10 w-10 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </div>
+            <!-- The actual image element -->
+            <img id="viewer-image" src="https://d2pn8kiwq2w21t.cloudfront.net/original_images/jpegPIA26671.jpg" alt="Curiosity Views Gale Crater's Rim - Full View" class="absolute invisible" style="transform-origin: center center;">
+            
+            <!-- Annotation Markers will be appended here -->
+
+            <!-- Close Button -->
+            <button id="close-modal" class="absolute top-4 right-4 text-white text-5xl font-light hover:text-gray-300 transition-colors z-30">&times;</button>
+        
+            <!-- Controls Bar -->
+            <div class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center flex-wrap justify-center gap-2 p-2 z-30">
+                <button id="zoom-out" class="control-btn" title="Zoom Out">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7"></path></svg>
+                </button>
+                <span id="zoom-level" class="text-white font-semibold w-16 text-center bg-gray-800 bg-opacity-70 rounded-full py-3">100%</span>
+                <button id="zoom-in" class="control-btn" title="Zoom In">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m-3-3h6"></path></svg>
+                </button>
+                <button id="reset-view" class="control-btn" title="Reset View">
+                    <svg class="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0011.664 0l3.181-3.183m-4.991-2.691V5.006h-4.992a8.25 8.25 0 00-11.665 0L2.985 7.694m16.023 1.654L19.005 7.694a8.25 8.25 0 00-11.664 0L2.985 9.348" /></svg>
+                </button>
+                 <button id="rotate-left" class="control-btn" title="Rotate Left">
+                    <svg class="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 15l-6 6m0 0l-6-6m6 6V9a6 6 0 0112 0v3" /></svg>
+                </button>
+                 <button id="rotate-right" class="control-btn" title="Rotate Right">
+                    <svg class="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15l6 6m0 0l6-6m-6 6V9a6 6 0 00-12 0v3" /></svg>
+                </button>
+                <button id="flip-horizontal" class="control-btn" title="Flip Horizontal">
+                    <svg class="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.88 7.823a7.5 7.5 0 00-11.215 0m11.215 0v.003V12m0-4.177v-.003c-.354.211-.72.398-1.096.562a19.498 19.498 0 01-8.02 0c-.376-.164-.742-.35-1.096-.562v.003zM4.5 12V9.284a1.5 1.5 0 01.98-1.423l5.093-2.546a1.5 1.5 0 011.854 0l5.093 2.546a1.5 1.5 0 01.98 1.423V12M4.5 12v6.529c0 .828.672 1.5 1.5 1.5h12a1.5 1.5 0 001.5-1.5V12" /></svg>
+                </button>
+                 <button id="fullscreen-btn" class="control-btn" title="Toggle Fullscreen">
+                     <svg class="w-6 h-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // DOM Elements
+        const openModalBtn = document.getElementById('open-modal-btn');
+        const modal = document.getElementById('image-viewer-modal');
+        const closeModal = document.getElementById('close-modal');
+        const viewerImage = document.getElementById('viewer-image');
+        const imageContainer = document.getElementById('image-container');
+        const loadingSpinner = document.getElementById('loading-spinner');
+
+        // Control Buttons
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        const resetViewBtn = document.getElementById('reset-view');
+        const zoomLevelDisplay = document.getElementById('zoom-level');
+        const rotateLeftBtn = document.getElementById('rotate-left');
+        const rotateRightBtn = document.getElementById('rotate-right');
+        const flipHorizontalBtn = document.getElementById('flip-horizontal');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const toggleAnnotationBtn = document.getElementById('toggle-annotation-mode');
+        const annotationText = document.getElementById('annotation-text');
+        const annotationList = document.getElementById('annotation-list');
+        const annotationCount = document.getElementById('annotation-count');
+        const noAnnotationsLi = document.getElementById('no-annotations');
+        const annotationModeText = document.getElementById('annotation-mode-text');
+
+        // State variables
+        let state = {
+            scale: 1,
+            translateX: 0,
+            translateY: 0,
+            rotate: 0,
+            flipX: 1
+        };
+
+        let annotations = [];
+        let annotationMode = false;
+        
+        const minScale = 0.2;
+        const maxScale = 8;
+        const scaleStep = 0.2;
+        
+        let panning = false;
+        let start = { x: 0, y: 0 };
+        let lastTouchDistance = null;
+
+        // Image loading
+        const img = new Image();
+        img.onload = () => {
+            loadingSpinner.style.display = 'none';
+            viewerImage.classList.remove('invisible');
+            if (!modal.classList.contains('hidden')) {
+                resetAndFitImage();
+            }
+        };
+        img.onerror = () => {
+            loadingSpinner.innerHTML = '<p class="text-red-500">Error loading image.</p>';
+        };
+        // Start loading the image immediately
+        img.src = viewerImage.src;
+
+        // --- Functions ---
+        function updateTransform() {
+            viewerImage.style.transform = `translate(${state.translateX}px, ${state.translateY}px) rotate(${state.rotate}deg) scaleX(${state.flipX}) scale(${state.scale})`;
+            zoomLevelDisplay.textContent = `${Math.round(state.scale * 100)}%`;
+            // Only allow grabbing/panning if zoomed in, or if annotation mode is off.
+            if (state.scale > 1 && !annotationMode) {
+                imageContainer.style.cursor = 'grab';
+                imageContainer.classList.remove('annotating');
+            } else if (annotationMode) {
+                imageContainer.style.cursor = 'crosshair';
+                imageContainer.classList.add('annotating');
+            }
+             else {
+                imageContainer.style.cursor = 'default';
+                imageContainer.classList.remove('annotating');
+            }
+            
+            // Reposition annotation markers based on current transform
+            annotations.forEach(annotation => {
+                const marker = document.getElementById(`marker-${annotation.id}`);
+                if (marker) {
+                    marker.style.left = `${annotation.x + state.translateX}px`;
+                    marker.style.top = `${annotation.y + state.translateY}px`;
+                }
+            });
+        }
+
+        function resetAndFitImage() {
+            state = { scale: 1, translateX: 0, translateY: 0, rotate: 0, flipX: 1 };
+            const containerRect = imageContainer.getBoundingClientRect();
+            
+            // Get the displayed dimensions of the image when fit to container
+            const imgAspectRatio = viewerImage.naturalWidth / viewerImage.naturalHeight;
+            const containerAspectRatio = containerRect.width / containerRect.height;
+            
+            let imgWidth, imgHeight;
+
+            // Fit the image to the largest possible size within the container (90% width/height for padding)
+            if (imgAspectRatio > containerAspectRatio) {
+                imgWidth = containerRect.width * 0.9;
+                imgHeight = imgWidth / imgAspectRatio;
+            } else {
+                imgHeight = containerRect.height * 0.9;
+                imgWidth = imgHeight * imgAspectRatio;
+            }
+            
+            // Set the *initial* visual size of the image element (which scale=1 is based on)
+            viewerImage.style.width = `${imgWidth}px`;
+            viewerImage.style.height = `${imgHeight}px`;
+
+            // Center the image initially
+            state.translateX = (containerRect.width - imgWidth) / 2;
+            state.translateY = (containerRect.height - imgHeight) / 2;
+            
+            updateTransform();
+        }
+
+        function openTheModal() {
+            modal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            if (img.complete) {
+                resetAndFitImage();
+            } else {
+                loadingSpinner.style.display = 'flex';
+                viewerImage.classList.add('invisible');
+            }
+        }
+
+        function closeTheModal() {
+            modal.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+            if (document.fullscreenElement) {
+                document.exitFullscreen();
+            }
+        }
+        
+        function applyZoom(newScale, centerX, centerY) {
+            const oldScale = state.scale;
+            state.scale = Math.max(minScale, Math.min(maxScale, newScale));
+
+            // Adjust translation based on the zoom center
+            state.translateX = centerX - (centerX - state.translateX) * (state.scale / oldScale);
+            state.translateY = centerY - (centerY - state.translateY) * (state.scale / oldScale);
+            
+            updateTransform();
+        }
+
+        function toggleAnnotationMode() {
+            annotationMode = !annotationMode;
+            if (annotationMode) {
+                toggleAnnotationBtn.classList.add('bg-red-500', 'hover:bg-red-600');
+                toggleAnnotationBtn.classList.remove('bg-gray-700', 'hover:bg-gray-600');
+                annotationModeText.textContent = 'Annotation Mode: ON';
+                annotationText.focus();
+            } else {
+                toggleAnnotationBtn.classList.remove('bg-red-500', 'hover:bg-red-600');
+                toggleAnnotationBtn.classList.add('bg-gray-700', 'hover:bg-gray-600');
+                annotationModeText.textContent = 'Enable Annotation Mode';
+            }
+            // Update cursor based on mode and scale
+            updateTransform();
+        }
+
+        function addAnnotation(e) {
+            if (!annotationMode) return;
+            
+            const featureName = annotationText.value.trim() || `Untitled Feature ${annotations.length + 1}`;
+            
+            const rect = imageContainer.getBoundingClientRect();
+            // Calculate click position relative to the container
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            // Store the position relative to the *untranslated* (but scaled and rotated) image origin
+            const newId = Date.now();
+            
+            const newAnnotation = {
+                id: newId,
+                x: clickX - state.translateX, // x relative to image's current translation offset
+                y: clickY - state.translateY, // y relative to image's current translation offset
+                label: featureName,
+                timestamp: new Date().toLocaleTimeString()
+            };
+
+            annotations.push(newAnnotation);
+            renderAnnotations();
+            
+            // Reset input field and optionally disable annotation mode
+            annotationText.value = '';
+            toggleAnnotationMode(); // Disable after placing one marker
+        }
+
+        function renderAnnotations() {
+            // Clear existing markers and list items
+            annotationList.innerHTML = '';
+            document.querySelectorAll('.annotation-marker').forEach(marker => marker.remove());
+
+            if (annotations.length === 0) {
+                 annotationList.appendChild(noAnnotationsLi);
+            } else {
+                annotations.forEach((annotation) => {
+                    // 1. Render the marker on the image container
+                    const marker = document.createElement('div');
+                    marker.className = 'annotation-marker';
+                    marker.id = `marker-${annotation.id}`;
+                    marker.title = annotation.label;
+                    marker.style.left = `${annotation.x + state.translateX}px`;
+                    marker.style.top = `${annotation.y + state.translateY}px`;
+                    imageContainer.appendChild(marker);
+
+                    // 2. Render the list item in the sidebar
+                    const listItem = document.createElement('li');
+                    listItem.className = 'flex justify-between items-center bg-gray-700 p-2 rounded-lg cursor-pointer hover:bg-gray-600 group';
+                    listItem.innerHTML = `
+                        <div>
+                            <p class="font-medium text-red-300">${annotation.label}</p>
+                            <p class="text-xs text-gray-400">@ ${annotation.timestamp}</p>
+                        </div>
+                        <button data-id="${annotation.id}" class="text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity text-xl leading-none">&times;</button>
+                    `;
+                    
+                    // Add event listener to scroll to marker on click (simulated focus)
+                    listItem.addEventListener('click', () => {
+                         marker.style.backgroundColor = '#10b981'; // temporary highlight
+                         setTimeout(() => marker.style.backgroundColor = '#ef4444', 500);
+                    });
+
+                    // Add event listener for deletion
+                    const deleteBtn = listItem.querySelector('button');
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevent the list item click event
+                        deleteAnnotation(parseInt(e.target.dataset.id));
+                    });
+
+                    annotationList.appendChild(listItem);
+                });
+            }
+            
+            annotationCount.textContent = annotations.length;
+        }
+
+        function deleteAnnotation(id) {
+            annotations = annotations.filter(ann => ann.id !== id);
+            renderAnnotations();
+        }
+
+        // --- Event Listeners ---
+        window.onload = () => {
+            // Apply initial button style
+            toggleAnnotationBtn.classList.add('bg-gray-700', 'hover:bg-gray-600', 'text-white');
+        };
+
+        openModalBtn.addEventListener('click', openTheModal);
+        closeModal.addEventListener('click', closeTheModal);
+        toggleAnnotationBtn.addEventListener('click', toggleAnnotationMode);
+
+        // Annotation Mode Click
+        imageContainer.addEventListener('click', (e) => {
+            if (annotationMode && e.target.id === 'image-container') {
+                addAnnotation(e);
+            }
+        });
+
+        // Controls
+        zoomInBtn.addEventListener('click', () => {
+            const rect = imageContainer.getBoundingClientRect();
+            applyZoom(state.scale + scaleStep, rect.width / 2, rect.height / 2);
+        });
+        zoomOutBtn.addEventListener('click', () => {
+             const rect = imageContainer.getBoundingClientRect();
+            applyZoom(state.scale - scaleStep, rect.width / 2, rect.height / 2);
+        });
+        resetViewBtn.addEventListener('click', resetAndFitImage);
+        rotateLeftBtn.addEventListener('click', () => { state.rotate -= 90; updateTransform(); });
+        rotateRightBtn.addEventListener('click', () => { state.rotate += 90; updateTransform(); });
+        flipHorizontalBtn.addEventListener('click', () => { state.flipX *= -1; updateTransform(); });
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                modal.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        });
+
+        // Mouse Pan
+        imageContainer.addEventListener('mousedown', (e) => {
+            if (e.button !== 0 || state.scale <= 1 || annotationMode) return;
+            e.preventDefault();
+            panning = true;
+            start = { x: e.clientX - state.translateX, y: e.clientY - state.translateY };
+            imageContainer.classList.add('grabbing');
+        });
+        window.addEventListener('mouseup', () => {
+            panning = false;
+            imageContainer.classList.remove('grabbing');
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!panning) return;
+            e.preventDefault();
+            state.translateX = e.clientX - start.x;
+            state.translateY = e.clientY - start.y;
+            updateTransform();
+        });
+
+        // Mouse Wheel Zoom
+        imageContainer.addEventListener('wheel', (e) => {
+            if (annotationMode) return; // Prevent zooming while in annotation mode
+            e.preventDefault();
+            const rect = imageContainer.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            // Use 0.001 as a smoother wheel delta multiplier
+            const newScale = state.scale - e.deltaY * 0.001 * state.scale;
+            applyZoom(newScale, mouseX, mouseY);
+        }, { passive: false });
+
+        // Touch Gestures
+        imageContainer.addEventListener('touchstart', (e) => {
+            if (annotationMode) return;
+
+            if (e.touches.length === 2) {
+                panning = false;
+                lastTouchDistance = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+            } else if (e.touches.length === 1 && state.scale > 1) {
+                panning = true;
+                start = { x: e.touches[0].clientX - state.translateX, y: e.touches[0].clientY - state.translateY };
+            }
+        }, { passive: true });
+
+        imageContainer.addEventListener('touchmove', (e) => {
+            if (annotationMode) return;
+
+            if (e.touches.length === 2 && lastTouchDistance) { // Pinch zoom
+                e.preventDefault();
+                const newTouchDistance = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+                const rect = imageContainer.getBoundingClientRect();
+                const touchCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+                const touchCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+                const scaleFactor = newTouchDistance / lastTouchDistance;
+                applyZoom(state.scale * scaleFactor, touchCenterX, touchCenterY);
+                lastTouchDistance = newTouchDistance;
+            } else if (e.touches.length === 1 && panning) { // Pan
+                e.preventDefault();
+                state.translateX = e.touches[0].clientX - start.x;
+                state.translateY = e.touches[0].clientY - start.y;
+                updateTransform();
+            }
+        }, { passive: false });
+
+        imageContainer.addEventListener('touchend', () => {
+            panning = false;
+            lastTouchDistance = null;
+        });
+
+        window.addEventListener('resize', () => {
+            if (!modal.classList.contains('hidden')) resetAndFitImage();
+        });
+
+    </script>
+</body>
+</html>
